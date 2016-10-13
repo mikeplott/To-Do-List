@@ -3,7 +3,6 @@ import org.h2.tools.Server;
 
 import java.sql.*;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Scanner;
 
 public class Main {
@@ -11,11 +10,26 @@ public class Main {
     public static void main(String[] args) throws SQLException {
         Server.createWebServer().start();
         Connection conn = DriverManager.getConnection("jdbc:h2:./man");
-        createTable(conn);
+        createTables(conn);
 
         Scanner scanner = new Scanner(System.in);
 
         while(true) {
+            System.out.println("Enter name:");
+            String name = scanner.nextLine();
+            System.out.println("Enter password");
+            String password = scanner.nextLine();
+
+            User user = selectUser(conn, name);
+            if (user == null) {
+                createUser(conn, name, password);
+                user = selectUser(conn, name);
+            }
+            else if (!password.equals(user.password)) {
+                System.out.println("Wrong password!");
+                continue;
+            }
+
             boolean isLoggedIn = true;
             while (isLoggedIn) {
                 System.out.println();
@@ -28,7 +42,7 @@ public class Main {
                 String option = scanner.nextLine();
                 switch (option) {
                     case "1":
-                        addToDo(scanner, conn);
+                        addToDo(scanner, conn, user);
                         break;
                     case "2":
                         toggleToDo(scanner, conn);
@@ -49,19 +63,21 @@ public class Main {
         }
     }
 
-    public static void createTable(Connection conn) throws SQLException {
+    public static void createTables(Connection conn) throws SQLException {
         Statement stmt = conn.createStatement();
-        stmt.execute("CREATE TABLE IF NOT EXISTS to_dos (id IDENTITY, text VARCHAR, is_done BOOLEAN)");
+        stmt.execute("CREATE TABLE IF NOT EXISTS to_dos (id IDENTITY, text VARCHAR, is_done BOOLEAN, user_id INT)");
+        stmt.execute("CREATE TABLE IF NOT EXISTS users (id IDENTITY, name VARCHAR, password VARCHAR)");
     }
 
-    public static void addToDo (Scanner scanner, Connection conn) throws SQLException {
+    public static void addToDo (Scanner scanner, Connection conn, User user) throws SQLException {
         System.out.println();
         System.out.println("Enter your to-do item:");
         String text = scanner.nextLine();
 
-        PreparedStatement stmt = conn.prepareStatement("INSERT INTO to_dos VALUES(NULL, ?, ?)");
+        PreparedStatement stmt = conn.prepareStatement("INSERT INTO to_dos VALUES(NULL, ?, ?, ?)");
         stmt.setString(1, text);
         stmt.setBoolean(2, false);
+        stmt.setInt(3, user.id);
         stmt.execute();
     }
 
@@ -76,14 +92,15 @@ public class Main {
     }
 
     public static void printList(Connection conn) throws SQLException {
-        PreparedStatement stmt = conn.prepareStatement("SELECT * FROM to_dos");
+        PreparedStatement stmt = conn.prepareStatement("SELECT * FROM to_dos INNER JOIN users ON to_dos.user_id = users.id");
         ResultSet results = stmt.executeQuery();
         ArrayList<Item> items = new ArrayList<>();
         while (results.next()) {
-            int id = results.getInt("id");
-            String text = results.getString("text");
-            boolean isDone = results.getBoolean("is_done");
-            Item item = new Item(id, text, isDone);
+            int id = results.getInt("to_dos.id");
+            String text = results.getString("to_dos.text");
+            boolean isDone = results.getBoolean("to_dos.is_done");
+            String name = results.getString("users.name");
+            Item item = new Item(id, text, isDone, name);
             items.add(item);
         }
 
@@ -94,7 +111,7 @@ public class Main {
             if (item3.isDone) {
                 checkbox = "[x]";
             }
-            System.out.printf("%s  %s. %s\n", checkbox, item3.id, item3.text);
+            System.out.printf("%s  %s. %s by %s\n", checkbox, item3.id, item3.text, item3.author);
         }
     }
 
@@ -104,6 +121,26 @@ public class Main {
 
         PreparedStatement stmt = conn.prepareStatement("DELETE FROM to_dos WHERE id = ?");
         stmt.setInt(1, i);
+        stmt.execute();
+    }
+
+    public static User selectUser(Connection conn, String name) throws SQLException {
+        PreparedStatement stmt = conn.prepareStatement("SELECT * FROM users WHERE name = ?");
+        stmt.setString(1, name);
+        ResultSet results = stmt.executeQuery();
+        if (results.next()) {
+            int id = results.getInt("id");
+            String password = results.getString("password");
+            User user = new User(id, name, password);
+            return user;
+        }
+        return null;
+    }
+
+    public static void createUser(Connection conn, String name, String password) throws SQLException {
+        PreparedStatement stmt = conn.prepareStatement("INSERT INTO users VALUES(null, ?, ?)");
+        stmt.setString(1, name);
+        stmt.setString(2, password);
         stmt.execute();
     }
 }
